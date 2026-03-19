@@ -222,6 +222,76 @@ def make_material(name, base_color, metallic=0.0, roughness=0.45):
     return material
 
 
+def make_wood_material(name, base_color, grain_color, roughness=0.45, grain_scale=6.0, bump_strength=0.08):
+    material = bpy.data.materials.new(name=name)
+    material.use_nodes = True
+    node_tree = material.node_tree
+    nodes = node_tree.nodes
+    links = node_tree.links
+    nodes.clear()
+
+    output = nodes.new(type="ShaderNodeOutputMaterial")
+    output.location = (520, 0)
+
+    bsdf = nodes.new(type="ShaderNodeBsdfPrincipled")
+    bsdf.location = (260, 0)
+    bsdf.inputs["Metallic"].default_value = 0.0
+    bsdf.inputs["Roughness"].default_value = roughness
+
+    texcoord = nodes.new(type="ShaderNodeTexCoord")
+    texcoord.location = (-980, -80)
+
+    mapping = nodes.new(type="ShaderNodeMapping")
+    mapping.location = (-760, -80)
+    mapping.inputs["Scale"].default_value = (grain_scale * 0.42, grain_scale * 0.42, grain_scale * 2.8)
+
+    noise = nodes.new(type="ShaderNodeTexNoise")
+    noise.location = (-520, 140)
+    noise.inputs["Scale"].default_value = grain_scale * 1.45
+    noise.inputs["Detail"].default_value = 10.0
+    noise.inputs["Roughness"].default_value = 0.5
+    noise.inputs["Distortion"].default_value = 0.35
+
+    wave = nodes.new(type="ShaderNodeTexWave")
+    wave.location = (-520, -70)
+    wave.wave_type = "BANDS"
+    wave.bands_direction = "Z"
+    wave.inputs["Scale"].default_value = grain_scale * 2.4
+    wave.inputs["Distortion"].default_value = 6.0
+    wave.inputs["Detail"].default_value = 3.5
+    wave.inputs["Detail Scale"].default_value = 1.7
+
+    mix = nodes.new(type="ShaderNodeMixRGB")
+    mix.location = (-240, 20)
+    mix.blend_type = "MIX"
+    mix.inputs["Fac"].default_value = 0.3
+
+    ramp = nodes.new(type="ShaderNodeValToRGB")
+    ramp.location = (-10, 20)
+    ramp.color_ramp.elements[0].position = 0.28
+    ramp.color_ramp.elements[0].color = grain_color
+    ramp.color_ramp.elements[1].position = 0.76
+    ramp.color_ramp.elements[1].color = base_color
+
+    bump = nodes.new(type="ShaderNodeBump")
+    bump.location = (20, -170)
+    bump.inputs["Strength"].default_value = bump_strength
+    bump.inputs["Distance"].default_value = 0.03
+
+    links.new(texcoord.outputs["Object"], mapping.inputs["Vector"])
+    links.new(mapping.outputs["Vector"], noise.inputs["Vector"])
+    links.new(mapping.outputs["Vector"], wave.inputs["Vector"])
+    links.new(noise.outputs["Fac"], wave.inputs["Distortion"])
+    links.new(wave.outputs["Color"], mix.inputs["Color1"])
+    links.new(noise.outputs["Color"], mix.inputs["Color2"])
+    links.new(mix.outputs["Color"], ramp.inputs["Fac"])
+    links.new(noise.outputs["Fac"], bump.inputs["Height"])
+    links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
+    links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
+    return material
+
+
 def assign_material(obj, material):
     if obj.data.materials:
         obj.data.materials[0] = material
@@ -384,7 +454,7 @@ def make_board_base(_asset_root, collection, wood_material):
     bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0, 0, BOARD_THICKNESS + 0.01))
     top = bpy.context.active_object
     top.name = "board_playfield"
-    top.scale = (8.25, 8.25, 0.035)
+    top.scale = (8.04, 8.04, 0.035)
     apply_transform(top)
     assign_material(top, wood_material)
     for parent_collection in list(top.users_collection):
@@ -431,7 +501,7 @@ def make_board_squares(collection, light_mat, dark_mat):
             bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, y, BOARD_THICKNESS + 0.05))
             square = bpy.context.active_object
             square.name = f"square_{file_name}{rank_name}"
-            square.scale = (0.48, 0.48, 0.028)
+            square.scale = (1.005, 1.005, 0.028)
             apply_transform(square)
             assign_material(square, light_mat if (file_index + rank_index) % 2 == 0 else dark_mat)
             for parent_collection in list(square.users_collection):
@@ -868,11 +938,46 @@ def main():
     scene = configure_scene(args)
     create_camera_and_lights(scene)
 
-    white_piece_mat = make_material("WhitePiece", (0.94, 0.92, 0.84, 1.0), roughness=0.38)
-    black_piece_mat = make_material("BlackPiece", (0.12, 0.12, 0.15, 1.0), roughness=0.34)
-    board_light_mat = make_material("BoardLight", (0.82, 0.73, 0.61, 1.0), roughness=0.58)
-    board_dark_mat = make_material("BoardDark", (0.14, 0.10, 0.09, 1.0), roughness=0.64)
-    wood_mat = make_material("BoardWood", (0.66, 0.54, 0.40, 1.0), roughness=0.74)
+    white_piece_mat = make_wood_material(
+        "WhitePiece",
+        (0.82, 0.67, 0.46, 1.0),
+        (0.50, 0.35, 0.20, 1.0),
+        roughness=0.28,
+        grain_scale=7.5,
+        bump_strength=0.05,
+    )
+    black_piece_mat = make_wood_material(
+        "BlackPiece",
+        (0.23, 0.14, 0.08, 1.0),
+        (0.10, 0.06, 0.03, 1.0),
+        roughness=0.34,
+        grain_scale=8.5,
+        bump_strength=0.04,
+    )
+    board_light_mat = make_wood_material(
+        "BoardLight",
+        (0.86, 0.74, 0.56, 1.0),
+        (0.62, 0.44, 0.24, 1.0),
+        roughness=0.50,
+        grain_scale=4.6,
+        bump_strength=0.03,
+    )
+    board_dark_mat = make_wood_material(
+        "BoardDark",
+        (0.34, 0.20, 0.10, 1.0),
+        (0.17, 0.09, 0.04, 1.0),
+        roughness=0.54,
+        grain_scale=5.0,
+        bump_strength=0.03,
+    )
+    wood_mat = make_wood_material(
+        "BoardWood",
+        (0.58, 0.39, 0.22, 1.0),
+        (0.33, 0.20, 0.10, 1.0),
+        roughness=0.62,
+        grain_scale=3.8,
+        bump_strength=0.02,
+    )
     hand_mat = create_hand_material()
 
     scene_collection = scene.collection
